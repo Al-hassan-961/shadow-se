@@ -3,6 +3,7 @@
 High-performance terminal interface and engine core for **clearweb** and
 **darkweb (.onion)** search, crawling, and indexing.
 
+- **Repository:** https://github.com/Al-hassan-961/shadow-se
 - **Author:** Al-hassan shehade
 - **Language:** C++20, thread-based concurrency
 - **Build:** CMake ≥ 3.16 (verified with Clang 21 on Termux/Android and Linux)
@@ -13,6 +14,29 @@ High-performance terminal interface and engine core for **clearweb** and
 > tested without touching the network.
 
 ---
+
+## Quick start
+
+```bash
+git clone https://github.com/Al-hassan-961/shadow-se.git
+cd shadow-se
+
+cmake -S . -B build -DSHADOWSE_BUILD_TESTS=ON
+cmake --build build -j"$(nproc)"
+
+./build/shadow-se --stub     # offline demo (default, no network needed)
+./build/shadow-se --curl     # real HTTP/HTTPS fetching (needs libcurl build)
+```
+
+Try these once the prompt appears:
+
+```text
+shadow-se@core:~$ search onion          # BM25-ranked darkweb results
+shadow-se@core:~$ crawl example.com     # async crawl, watch [+] events stream in
+shadow-se@core:~$ status                # Tor probe + index/crawler stats
+shadow-se@core:~$ help
+shadow-se@core:~$ quit
+```
 
 ## Features
 
