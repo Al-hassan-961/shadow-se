@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+build-*/
+.cache/
+compile_commands.json
+
+# Object / library files
+*.o
+*.a
+*.so
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

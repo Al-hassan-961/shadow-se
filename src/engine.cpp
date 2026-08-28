@@ -1,0 +1,139 @@
+// SPDX-License-Identifier: MIT
+// Shadow SE - engine facade: index + ranking + Tor routing + crawler.
+#include "shadowse/engine.hpp"
+
+#include "shadowse/tokenizer.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <memory>
+
+namespace shadowse {
+
+Engine::Engine(Config cfg) : cfg_(cfg) {
+    // A real SOCKS5 probe up front: refused connections return instantly,
+    // so this only costs time when the port is silently filtered.
+    lastTor_ = probeTor();
+
+#ifdef HAVE_CURL
+    if (!cfg_.useStubFetcher) {
+        std::string proxy;
+        if (lastTor_.status == TorStatus::Up) {
+            proxy = "socks5h://" + cfg_.torHost + ":" + std::to_string(cfg_.torPort);
+        }
+        fetcher_ = std::make_shared<CurlFetcher>(proxy);
+    }
+#endif
+    if (!fetcher_) {
+        fetcher_ = std::make_shared<StubFetcher>();
+    }
+
+    Crawler::Options copts;
+    copts.workerCount = cfg_.crawlerWorkers;
+    copts.maxPages = cfg_.crawlerMaxPages;
+    copts.maxDepth = cfg_.crawlerMaxDepth;
+    crawler_ = std::make_unique<Crawler>(index_, fetcher_, copts);
+}
+
+Engine::~Engine() {
+    shutdown();
+}
+
+TorProbeResult Engine::probeTor() {
+    lastTor_ = shadowse::probeTor(cfg_.torHost, cfg_.torPort);
+    return lastTor_;
+}
+
+std::vector<ScoredDocument> Engine::search(const std::string& query, std::size_t limit) {
+    const std::vector<std::string> tokens = tokenize(query);
+    BM25Ranker ranker;
+    return ranker.rank(index_, tokens, limit);
+}
+
+bool Engine::crawl(const std::string& url) {
+    return crawler_->enqueue(url, 0);
+}
+
+std::size_t Engine::pendingCrawls() const {
+    return crawler_->pendingCount();
+}
+
+std::size_t Engine::crawledPages() const {
+    return crawler_->crawledCount();
+}
+
+bool Engine::crawlerBusy() const {
+    return crawler_->running();
+}
+
+void Engine::shutdown() {
+    crawler_->stop();
+}
+
+void Engine::seedDemoData() {
+    const std::string intelFeed = "Real-time clearweb crawler telemetry, TLS certificate "
+                                  "transparency logs, IOC correlation matrices, dark threat "
+                                  "intelligence reporting and sandbox analysis pipelines.";
+    const std::string docs = "Comprehensive architecture overview for the modern C++20 memory "
+                             "safety model, sandboxing, inverted index compression, bm25 ranking "
+                             "and tor routing used by the shadow search engine.";
+
+    const std::string vault = "Encrypted storage node containing scraped telemetry, logs and "
+                              "historical metadata mapping across darknet hidden services. Indexed "
+                              "onion vault maintained over the tor anonymity network.";
+    const std::string drop = "Decentralized onion drop point. Verified active via SOCKS5 proxy "
+                             "routing loop against the local tor daemon on 127.0.0.1:9050. "
+                             "Accepts mirror submissions and metadata exchange.";
+
+    Document d1;
+    d1.url = "https://shadow-se.internal/intel/feed-2026";
+    d1.title = "Shadow SE Threat Intelligence Feed";
+    d1.snippet = "Clearweb crawler telemetry, TLS transparency logs, IOC correlation";
+    d1.content = intelFeed;
+    d1.source = SourceType::ClearWeb;
+
+    Document d2;
+    d2.url = "https://github.com/alhassanshehade/shadow-se-docs";
+    d2.title = "Open Source OSINT Framework Documentation";
+    d2.snippet = "Architecture overview for C++20 memory safety, sandboxing, index compression";
+    d2.content = docs;
+    d2.source = SourceType::ClearWeb;
+
+    Document d3;
+    d3.url = "http://shadow77ivq2cc3x.onion/index/vault";
+    d3.title = "DeepNet Secured Vault // Index Node 04";
+    d3.snippet = "Encrypted storage node with scraped telemetry, logs, historical metadata";
+    d3.content = vault;
+    d3.source = SourceType::Onion;
+
+    Document d4;
+    d4.url = "http://anondrop55s3q5xx.onion/drop";
+    d4.title = "Hidden Services Directory & Mirror";
+    d4.snippet = "Decentralized onion drop point verified via SOCKS5 proxy routing loop";
+    d4.content = drop;
+    d4.source = SourceType::Onion;
+
+    index_.addDocument(d1);
+    index_.addDocument(d2);
+    index_.addDocument(d3);
+    index_.addDocument(d4);
+}
+
+std::string normalizeUrl(const std::string& input) {
+    std::string url = input;
+    // Trim surrounding whitespace.
+    url.erase(url.begin(), std::find_if(url.begin(), url.end(),
+                                        [](unsigned char c) { return !std::isspace(c); }));
+    url.erase(std::find_if(url.rbegin(), url.rend(),
+                           [](unsigned char c) { return !std::isspace(c); }).base(),
+              url.end());
+    if (url.empty()) {
+        return {};
+    }
+    if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+        url = "http://" + url;
+    }
+    return url;
+}
+
+} // namespace shadowse
