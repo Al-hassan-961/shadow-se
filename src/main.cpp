@@ -24,11 +24,16 @@
 #include <thread>
 #include <vector>
 
+#include "shadowse/admin.hpp"
+
 #ifdef __unix__
 #include <termios.h>
 #include <unistd.h>
 #endif
 
+using shadowse::ActivityEvent;
+using shadowse::ActivityLog;
+using shadowse::AdminServer;
 using shadowse::Document;
 using shadowse::Engine;
 using shadowse::SourceType;
@@ -186,6 +191,7 @@ void printHelpMenu() {
     std::cout << "  crawl <url>            - Dispatch the asynchronous sandbox crawler to ingest a target\n";
     std::cout << "  save <path>            - Encrypt the index to a snapshot (XChaCha20-Poly1305 + Argon2id)\n";
     std::cout << "  load <path>            - Load an encrypted snapshot into the index\n";
+    std::cout << "  admin                  - Open the local admin-only dashboard (Tor/onion/index/crawler)\n";
     std::cout << "  status                 - Show Tor probe, index statistics and crawler queue\n";
     std::cout << "  help                   - Display this command instruction menu\n";
     std::cout << "  exit / quit            - Drain the crawler and safely terminate\n\n";
@@ -284,14 +290,27 @@ int main(int argc, char** argv) {
 
     engine->seedDemoData();
 
-    // Crawl events stream into the terminal from the worker pool.
+    // Crawl events stream into the terminal (and the admin activity log).
+    auto activity = std::make_shared<ActivityLog>();
     engine->crawler().setCallbacks(
-        [](const Document& doc) {
+        [activity](const Document& doc) {
+            ActivityEvent ev;
+            ev.time = std::chrono::system_clock::now();
+            ev.kind = "indexed";
+            ev.url = doc.url;
+            ev.text = doc.title;
+            activity->add(std::move(ev));
             printLocked("\r  " + UIColors::GREEN + "[+] Indexed" + UIColors::RESET + " \"" +
                         doc.title + "\" " + sourceBadge(doc.source) + " " + UIColors::DIM +
                         doc.url + UIColors::RESET + "\n");
         },
-        [](const std::string& url, const std::string& error) {
+        [activity](const std::string& url, const std::string& error) {
+            ActivityEvent ev;
+            ev.time = std::chrono::system_clock::now();
+            ev.kind = "error";
+            ev.url = url;
+            ev.text = error;
+            activity->add(std::move(ev));
             printLocked("\r  " + UIColors::RED + "[!] Failed" + UIColors::RESET + " " + url +
                         " (" + error + ")\n");
         });
@@ -328,6 +347,25 @@ int main(int argc, char** argv) {
         } else if (input == "status") {
             printTorStatus(engine->probeTor());
             printStats(*engine);
+        } else if (input == "admin") {
+            // Launch the local admin-only dashboard on the live engine.
+            shadowse::AdminOptions aopts;
+            aopts.port = 8081;
+            aopts.onionHostnameFile = "onion/tor_data/hidden/hostname";
+            auto admin = std::make_shared<AdminServer>(*engine, *activity, aopts);
+            std::string aerr;
+            if (!admin->start(&aerr)) {
+                std::cout << UIColors::RED << "[!] Admin dashboard failed: " << aerr
+                          << UIColors::RESET << "\n";
+            } else {
+                admin->runAsync();
+                std::cout << UIColors::GREEN << "[✔] Admin dashboard: " << UIColors::RESET
+                          << "http://127.0.0.1:" << admin->port() << "/?t=" << admin->token()
+                          << "\n"
+                          << UIColors::DIM
+                          << "    Loopback + token required. Type 'quit' later to stop.\n"
+                          << UIColors::RESET;
+            }
         } else if (input.rfind("search ", 0) == 0) {
             const std::string query = trim(input.substr(7));
             if (query.empty()) {

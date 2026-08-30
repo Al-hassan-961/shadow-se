@@ -79,7 +79,8 @@ Options:
 - `-DSHADOWSE_BUILD_TESTS=OFF` — skip the test suite.
 
 Binaries produced: `shadow-se` (terminal UI), `shadow-se-web` (web front end),
-`se-keygen` (stealth onion keys), `shadow-se-tests`.
+`shadow-se-admin` (admin dashboard), `se-keygen` (stealth onion keys),
+`shadow-se-tests`.
 
 ## Usage
 
@@ -136,6 +137,31 @@ Serves a search page over the engine with **no cookies, no logs, and strict
 privacy headers** (CSP, `no-referrer`, `Permissions-Policy`, `Clear-Site-Data`,
 `X-Frame-Options`), HTML-escaped output, and binds to **loopback only**.
 Expose it exclusively through a Tor onion service (below).
+
+## Admin dashboard (local, admin only)
+
+See what is happening on the site in real time from a local browser:
+
+```bash
+./build/shadow-se-admin                  # runs the public site + admin panel
+```
+
+It prints a URL like `http://127.0.0.1:8081/?t=<TOKEN>` (loopback only, token
+required). It shows live **Tor status**, the **onion address**, **index
+statistics**, **crawler queue**, and a real-time **activity feed** of every
+indexed page / crawl error, auto-refreshing every few seconds. Both the site
+(`:8080`) and the dashboard (`:8081`) bind to `127.0.0.1` only, so only the
+operator can reach them.
+
+Or, from the interactive terminal shell, just type:
+
+```text
+shadow-se@core:~$ admin
+  [✔] Admin dashboard: http://127.0.0.1:8081/?t=...
+```
+
+Options: `--token T` (set the admin token), `--onion-dir DIR`, `--load SNAP
+--password PW`.
 
 ## Stealth onion service
 

@@ -46,6 +46,7 @@ add_library(shadowse_core STATIC
   src/crypto.cpp
   src/snapshot.cpp
   src/web_server.cpp
+  src/admin.cpp
 )
 target_include_directories(shadowse_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(shadowse_core PUBLIC Threads::Threads)
@@ -94,6 +95,12 @@ add_executable(shadow-se-web src/web_main.cpp)
 target_link_libraries(shadow-se-web PRIVATE shadowse_core)
 
 # ---------------------------------------------------------------------------
+# Local admin-only dashboard (live site status + activity feed)
+# ---------------------------------------------------------------------------
+add_executable(shadow-se-admin src/admin_main.cpp)
+target_link_libraries(shadow-se-admin PRIVATE shadowse_core)
+
+# ---------------------------------------------------------------------------
 # Stealth onion client-authorization key generator
 # ---------------------------------------------------------------------------
 add_executable(se-keygen src/se_keygen.cpp)
@@ -115,6 +122,7 @@ if(SHADOWSE_BUILD_TESTS)
     tests/test_crypto.cpp
     tests/test_snapshot.cpp
     tests/test_web.cpp
+    tests/test_admin.cpp
   )
   target_link_libraries(shadow-se-tests PRIVATE shadowse_core)
   add_test(NAME shadowse-tests COMMAND shadow-se-tests)
