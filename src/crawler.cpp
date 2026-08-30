@@ -116,32 +116,113 @@ std::string htmlExtractDescription(const std::string& html) {
     return {};
 }
 
+namespace {
+// Tags whose inner content is boilerplate/script and should be dropped from
+// the extracted body text (keeps title/body tokenization clean).
+bool isRemoveBlock(const std::string& lower) {
+    static const char* const kBlocks[] = {"script", "style",  "noscript", "template",
+                                          "svg",    "head",   "nav",      "footer",
+                                          "header", "aside"};
+    for (const char* b : kBlocks) {
+        if (lower == b) return true;
+    }
+    return false;
+}
+std::string lowerAscii(std::string s) {
+    for (char& c : s) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    return s;
+}
+} // namespace
+
 std::string htmlStripTags(const std::string& html) {
     std::string out;
     out.reserve(html.size());
-    bool inTag = false;
-    for (char c : html) {
-        if (c == '<') {
-            inTag = true;
-            // Treat a tag boundary as a word separator when text directly abuts it.
-            if (!out.empty() && out.back() != ' ') {
-                out.push_back(' ');
-            }
-            continue;
-        }
-        if (c == '>') {
-            inTag = false;
-            continue;
-        }
-        if (inTag) {
-            continue;
-        }
+    const std::size_t n = html.size();
+    std::size_t i = 0;
+
+    auto appendText = [&](char c) {
         // Never leave a space before punctuation (e.g. "word !" -> "word!").
         if (out.size() >= 1 && out.back() == ' ' &&
             std::ispunct(static_cast<unsigned char>(c))) {
             out.pop_back();
         }
         out.push_back(c);
+    };
+    auto separator = [&]() {
+        if (!out.empty() && out.back() != ' ') {
+            out.push_back(' ');
+        }
+    };
+
+    while (i < n) {
+        if (html[i] != '<') {
+            appendText(html[i]);
+            ++i;
+            continue;
+        }
+        // HTML comment: drop entirely.
+        if (html.compare(i, 4, "<!--") == 0) {
+            const std::size_t end = html.find("-->", i + 4);
+            i = end == std::string::npos ? n : end + 3;
+            continue;
+        }
+        const std::size_t gt = html.find('>', i);
+        const std::size_t tagEnd = gt == std::string::npos ? n : gt;
+
+        // Extract the tag name after '<' or '</'.
+        std::size_t nameStart = i + 1;
+        if (nameStart < n && html[nameStart] == '/') {
+            ++nameStart;
+        }
+        std::size_t nameEnd = nameStart;
+        while (nameEnd < tagEnd && html[nameEnd] != ' ' && html[nameEnd] != '\t' &&
+               html[nameEnd] != '\n' && html[nameEnd] != '/') {
+            ++nameEnd;
+        }
+        const std::string name = lowerAscii(html.substr(nameStart, nameEnd - nameStart));
+
+        // Self-closing tag (e.g. <br/>): just a separator.
+        const bool selfClosing = gt != std::string::npos && gt > i && html[gt - 1] == '/';
+
+        if (!name.empty() && isRemoveBlock(name) && !selfClosing) {
+            // Drop the block's inner content up to the matching close tag.
+            const std::string close = "</" + name;
+            std::size_t searchFrom = gt == std::string::npos ? n : gt + 1;
+            std::size_t closePos = std::string::npos;
+            for (std::size_t s = searchFrom; s + close.size() <= n; ++s) {
+                bool match = true;
+                for (std::size_t t = 0; t < close.size(); ++t) {
+                    char a = html[s + t];
+                    if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
+                    if (a != close[t]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    const std::size_t after = s + close.size();
+                    const char ac = after < n ? html[after] : '>';
+                    if (after >= n || ac == ' ' || ac == '>' || ac == '/' || ac == '\t' ||
+                        ac == '\n') {
+                        closePos = s;
+                        break;
+                    }
+                }
+            }
+            if (closePos == std::string::npos) {
+                i = n;  // unterminated block: drop the remainder
+            } else {
+                separator();
+                const std::size_t closeGt = html.find('>', closePos + close.size());
+                i = closeGt == std::string::npos ? n : closeGt + 1;
+            }
+            continue;
+        }
+        // Ordinary tag: treat as a word separator and skip it.
+        separator();
+        i = gt == std::string::npos ? n : gt + 1;
     }
     return collapseWhitespace(out);
 }
@@ -209,24 +290,40 @@ std::vector<std::string> htmlExtractLinks(const std::string& html, const std::st
 // ---------------------------------------------------------------------------
 
 Crawler::Crawler(InvertedIndex& index, std::shared_ptr<Fetcher> fetcher, Options opts)
-    : index_(index), fetcher_(std::move(fetcher)), opts_(opts) {}
+    : index_(index),
+      fetcher_(std::move(fetcher)),
+      opts_(opts),
+      bloom_(opts_.bloomExpected > 0 ? opts_.bloomExpected : 10000),
+      robots_(opts_.userAgent) {}
 
 Crawler::~Crawler() {
     stop();
 }
 
-bool Crawler::enqueue(const std::string& url, std::uint32_t depth) {
+bool Crawler::enqueue(const std::string& url, std::uint32_t depth, int priority) {
     std::lock_guard<std::mutex> lock(mtx_);
     if (stop_.load()) {
         return false;
     }
-    if (!seenUrls_.insert(url).second) {
-        return false;  // duplicate
-    }
     if (crawled_ + pending_ >= opts_.maxPages) {
         return false;  // page cap reached
     }
-    queue_.emplace(url, depth);
+    // Duplicate filtering: the exact set is authoritative; the Bloom filter is
+    // a fast-membership layer (it never causes a false rejection - on a hit we
+    // confirm against the exact set).
+    if (bloom_.maybeContains(url)) {
+        if (seenUrls_.count(url)) {
+            return false;  // real duplicate
+        }
+        // Bloom false positive: fall through and accept.
+    }
+    if (!seenUrls_.insert(url).second) {
+        return false;
+    }
+    bloom_.insert(url);
+
+    const int p = priority < 0 ? static_cast<int>(depth) : priority;
+    queue_.emplace(Item{url, depth, p, seq_++});
     ++pending_;
     if (!running_.load()) {
         running_.store(true);
@@ -281,7 +378,7 @@ bool Crawler::running() const {
 
 void Crawler::workerLoop() {
     for (;;) {
-        std::pair<std::string, std::uint32_t> item;
+        Item item;
         {
             std::unique_lock<std::mutex> lock(mtx_);
             cv_.wait(lock, [this] { return stop_.load() || !queue_.empty(); });
@@ -291,10 +388,10 @@ void Crawler::workerLoop() {
                 }
                 continue;
             }
-            item = std::move(queue_.front());
+            item = queue_.top();
             queue_.pop();
         }
-        process(item.first, item.second);
+        process(item.url, item.depth);
         {
             std::lock_guard<std::mutex> lock(mtx_);
             --pending_;
@@ -303,10 +400,69 @@ void Crawler::workerLoop() {
     }
 }
 
+std::string Crawler::domainOf(const std::string& url) const {
+    const std::size_t scheme = url.find("://");
+    if (scheme == std::string::npos) {
+        return url;
+    }
+    const std::size_t hostStart = scheme + 3;
+    const std::size_t end = url.find_first_of("/?#", hostStart);
+    return url.substr(hostStart, end == std::string::npos ? std::string::npos : end - hostStart);
+}
+
+bool Crawler::isRobotsUrl(const std::string& url) {
+    return url.find("robots.txt") != std::string::npos;
+}
+
+void Crawler::politenessWait(const std::string& domain) {
+    for (;;) {
+        std::chrono::steady_clock::time_point last{};
+        {
+            std::lock_guard<std::mutex> lock(politenessMtx_);
+            const auto it = lastFetch_.find(domain);
+            if (it != lastFetch_.end()) {
+                last = it->second;
+            }
+        }
+        const auto now = std::chrono::steady_clock::now();
+        const auto wait = opts_.domainDelay - (now - last);
+        if (wait.count() <= 0) {
+            std::lock_guard<std::mutex> lock(politenessMtx_);
+            lastFetch_[domain] = std::chrono::steady_clock::now();
+            return;
+        }
+        const auto sleepFor = std::min(
+            std::chrono::duration_cast<std::chrono::milliseconds>(wait),
+            std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(sleepFor);
+    }
+}
+
 void Crawler::process(const std::string& url, std::uint32_t depth) {
     if (opts_.requestDelay.count() > 0) {
         std::this_thread::sleep_for(opts_.requestDelay);
     }
+    const std::string domain = domainOf(url);
+
+    // robots.txt compliance (skipped for the robots.txt URL itself).
+    if (opts_.obeyRobots && !isRobotsUrl(url)) {
+        if (!robots_.hasRules(url)) {
+            politenessWait(domain);
+            robots_.loadDomain(*fetcher_, url);
+        }
+        if (!robots_.allowed(url)) {
+            OnError err;
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                err = onErr_;
+            }
+            if (err) {
+                err(url, "blocked by robots.txt");
+            }
+            return;
+        }
+    }
+    politenessWait(domain);
 
     FetchResult fetched = fetcher_->fetch(url);
     if (!fetched.ok) {
@@ -346,10 +502,11 @@ void Crawler::process(const std::string& url, std::uint32_t depth) {
         onDoc(doc);
     }
 
-    // Follow links when within the depth budget.
+    // Follow links within the depth budget; discovered links inherit a
+    // depth-based priority so shallower pages are crawled first.
     if (depth + 1 <= opts_.maxDepth) {
         for (const std::string& link : htmlExtractLinks(fetched.html, url)) {
-            if (!enqueue(link, depth + 1)) {
+            if (!enqueue(link, depth + 1, static_cast<int>(depth + 1))) {
                 break;  // cap reached or duplicate flood; stop scanning
             }
         }

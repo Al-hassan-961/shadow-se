@@ -153,4 +153,17 @@ std::string normalizeUrl(const std::string& input) {
     return url;
 }
 
+bool Engine::saveState(const std::string& path, std::string* err) const {
+    return saveSnapshot(path, index_.allDocuments(), err);
+}
+
+bool Engine::loadState(const std::string& path, std::string* err) {
+    std::vector<Document> docs;
+    if (!loadSnapshot(path, &docs, err)) {
+        return false;
+    }
+    index_.replaceAll(docs);
+    return true;
+}
+
 } // namespace shadowse

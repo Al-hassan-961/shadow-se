@@ -29,6 +29,18 @@ std::string stubHost(const std::string& url) {
 } // namespace
 
 FetchResult StubFetcher::fetch(const std::string& url) {
+    // Serve a permissive robots.txt so the crawler's compliance check works
+    // offline without a real network.
+    const std::size_t rp = url.rfind("robots.txt");
+    const bool isRobots =
+        rp != std::string::npos && (rp == 0 || url[rp - 1] == '/' || url[rp - 1] == '?');
+    if (isRobots) {
+        FetchResult result;
+        result.ok = true;
+        result.html = "User-agent: *\nAllow: /\n";
+        return result;
+    }
+
     const std::string host = stubHost(url);
     const std::string safeHost = host.empty() ? "unknown" : host;
 

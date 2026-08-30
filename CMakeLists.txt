@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(shadowse VERSION 1.1.0 LANGUAGES CXX
+project(shadowse VERSION 1.2.0 LANGUAGES CXX
         DESCRIPTION "Shadow SE - secure clearweb & .onion search engine core")
 
 set(CMAKE_CXX_STANDARD 20)
@@ -47,8 +47,15 @@ add_library(shadowse_core STATIC
   src/snapshot.cpp
   src/web_server.cpp
   src/admin.cpp
+  src/json.cpp
+  src/bloom_filter.cpp
+  src/robots_txt.cpp
+  src/gateway.cpp
 )
 target_include_directories(shadowse_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# Vendored header-only libraries (cpp-httplib) as a system include so their
+# warnings are suppressed.
+target_include_directories(shadowse_core SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 target_link_libraries(shadowse_core PUBLIC Threads::Threads)
 target_compile_features(shadowse_core PUBLIC cxx_std_20)
 
@@ -101,6 +108,12 @@ add_executable(shadow-se-admin src/admin_main.cpp)
 target_link_libraries(shadow-se-admin PRIVATE shadowse_core)
 
 # ---------------------------------------------------------------------------
+# HTTP/JSON gateway (/search, /crawl, /status)
+# ---------------------------------------------------------------------------
+add_executable(shadow-se-gateway src/gateway_main.cpp)
+target_link_libraries(shadow-se-gateway PRIVATE shadowse_core)
+
+# ---------------------------------------------------------------------------
 # Stealth onion client-authorization key generator
 # ---------------------------------------------------------------------------
 add_executable(se-keygen src/se_keygen.cpp)
@@ -123,6 +136,16 @@ if(SHADOWSE_BUILD_TESTS)
     tests/test_snapshot.cpp
     tests/test_web.cpp
     tests/test_admin.cpp
+    tests/test_json.cpp
+    tests/test_persistence.cpp
+    tests/test_html_parser.cpp
+    tests/test_bloom.cpp
+    tests/test_robots.cpp
+    tests/test_frontier.cpp
+    tests/test_gateway.cpp
+    tests/test_utf8.cpp
+    tests/test_bm25_edges.cpp
+    tests/test_socks5.cpp
   )
   target_link_libraries(shadow-se-tests PRIVATE shadowse_core)
   add_test(NAME shadowse-tests COMMAND shadow-se-tests)

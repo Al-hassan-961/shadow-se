@@ -17,6 +17,12 @@ std::string serializeDocuments(const std::vector<Document>& docs);
 bool deserializeDocuments(const std::string& data, std::vector<Document>* out,
                           std::string* err);
 
+// Plain binary persistence of a document set (fast disk round-trip; the index
+// is rebuilt from documents on load).
+bool saveSnapshot(const std::string& path, const std::vector<Document>& docs,
+                  std::string* err);
+bool loadSnapshot(const std::string& path, std::vector<Document>* docs, std::string* err);
+
 // Encrypts `docs` with XChaCha20-Poly1305 (key derived from password via
 // Argon2id) and writes salt|nonce|ciphertext to `path`.
 bool saveEncryptedSnapshot(const std::string& path, const std::string& password,

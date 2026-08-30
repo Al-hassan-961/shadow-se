@@ -45,20 +45,24 @@ shadow-se@core:~$ quit
 | **Inverted index** | Thread-safe in-memory index; title tokens weighted 3×; URL-keyed document replacement; un-index on removal. |
 | **BM25 ranking** | Classic Robertson–Walker BM25 (`k1 = 1.2`, `b = 0.75`) with OR query semantics. |
 | **Tokenizer** | UTF-8 aware: ASCII, Latin-1/Latin Extended, Greek, Cyrillic and CJK tokens with case folding; malformed UTF-8 tolerated. |
+| **Disk persistence** | Fast versioned binary serialization of the index + document store; `save-state`/`load-state` persist and restore between runs. |
 | **Tor routing** | Real SOCKS5 greeting handshake against `127.0.0.1:9050` with a deadline; onion crawls are routed through a `socks5h://` proxy when Tor is up. |
-| **Crawler** | Async worker pool with a bounded frontier, depth limits, URL dedup, page caps, and politeness delay. |
-| **Fetchers** | `StubFetcher` (deterministic offline HTML) and `CurlFetcher` (libcurl, optional). |
+| **Crawler** | Async worker pool with an **advanced frontier**: priority scheduling, per-domain politeness delays, Bloom-filter duplicate filtering, and **robots.txt compliance**. |
+| **HTML parser** | Tag-aware extraction that strips scripts, styles, comments and boilerplate (`nav`/`footer`/`header`/`aside`) for clean title/body tokenization. |
+| **Fetchers** | `StubFetcher` (deterministic offline HTML + robots.txt) and `CurlFetcher` (libcurl, optional). |
 | **Encryption** | Authenticated encryption at rest — **XChaCha20-Poly1305 AEAD** (256-bit, IND-CCA) + **Argon2id** key derivation via libsodium. `save`/`load` encrypted index snapshots. |
 | **Web front end** | Privacy-hardened HTTP search UI: no cookies, no logs, strict CSP, no trackers, XSS-safe, loopback-only. |
+| **JSON gateway** | `cpp-httplib` based `/search`, `/crawl`, `/status` JSON endpoints for browser/script interaction. |
 | **Stealth onion** | v3 Tor hidden service with **client authorization** (only key-holders can reach it). Tooling + deploy script in `onion/`. |
 | **Terminal UI** | Interactive shell with live crawl event stream and engine health panel. |
 
 ## Layout
 
 ```
-include/shadowse/   public headers (document, tokenizer, index, bm25, tor, fetcher, crawler, engine, crypto, snapshot, web_server)
-src/                implementations + main.cpp (terminal UI), web_main.cpp, se_keygen.cpp
-onion/              stealth onion service tooling (setup.sh, torrc, CLIENT.md)
+include/shadowse/   public headers (document, tokenizer, index, bm25, tor, fetcher, crawler, engine, crypto, snapshot, web_server, admin, json, bloom_filter, robots_txt, gateway)
+src/                implementations + main.cpp, web_main.cpp, admin_main.cpp, gateway_main.cpp, se_keygen.cpp
+third_party/        vendored header-only libs (cpp-httplib)
+onion/              stealth onion service tooling (setup.sh, torrc.example, CLIENT.md)
 tests/              unit tests (self-contained framework, CTest integrated)
 CMakeLists.txt      build configuration
 ```
@@ -79,8 +83,8 @@ Options:
 - `-DSHADOWSE_BUILD_TESTS=OFF` — skip the test suite.
 
 Binaries produced: `shadow-se` (terminal UI), `shadow-se-web` (web front end),
-`shadow-se-admin` (admin dashboard), `se-keygen` (stealth onion keys),
-`shadow-se-tests`.
+`shadow-se-admin` (admin dashboard), `shadow-se-gateway` (JSON gateway),
+`se-keygen` (stealth onion keys), `shadow-se-tests`.
 
 ## Usage
 
@@ -91,6 +95,8 @@ $ ./build/shadow-se [--stub | --curl]
   crawl  <url>     Dispatch the asynchronous sandbox crawler to ingest a target
   save   <path>    Encrypt the index to a snapshot (XChaCha20-Poly1305 + Argon2id)
   load   <path>    Load an encrypted snapshot into the index
+  save-state <path>  Persist the index to disk (fast, plain binary)
+  load-state <path>  Reload a persisted index from disk
   status           Show Tor probe, index statistics and crawler queue
   help             Display the command menu
   exit / quit      Drain the crawler and safely terminate
@@ -125,6 +131,37 @@ This is the honest way to do "strong encryption": AES-256 already provides
 ~256-bit security, so the meaningful upgrades are *authenticated* encryption
 and a memory-hard key-derivation function — not a home-grown cipher (which
 would be weaker). `CryptoBox` in `crypto.{hpp,cpp}` wraps libsodium.
+
+## Disk persistence
+
+`save-state <path>` / `load-state <path>` persist and reload the whole index and
+document store between runs using a fast versioned binary format (length-prefixed
+fields, magic + version header). The postings list is rebuilt from the documents
+on load, so restarts are cheap and exact. Use the encrypted `save`/`load`
+commands instead when you want the index encrypted at rest.
+
+## JSON gateway (cpp-httplib)
+
+```bash
+./build/shadow-se-gateway --port 8090 --stub
+curl 'http://127.0.0.1:8090/search?q=onion'
+curl -X POST -d '{"url":"example.com"}' http://127.0.0.1:8090/crawl
+curl http://127.0.0.1:8090/status
+```
+
+Exposes `/search` (GET `?q=` or POST JSON `{"q":...}`), `/crawl` (GET `?url=`
+or POST `{"url":...}`), and `/status` as JSON on the loopback interface, backed
+by the header-only [cpp-httplib](https://github.com/yhirose/cpp-httplib)
+library (vendored in `third_party/`). Requests are size-bounded and input is
+validated.
+
+## Advanced crawler frontier
+
+The crawler now schedules work with **priorities** (0 = highest; discovered
+links inherit a depth-based priority), enforces **per-domain politeness
+delays**, deduplicates URLs with an exact set backed by a **Bloom filter**, and
+honors **robots.txt** (cached per origin, fail-open on fetch errors). `Crawler::Options`
+gains `domainDelay`, `obeyRobots`, `userAgent`, and `bloomExpected`.
 
 ## Web front end (privacy hardened)
 
@@ -213,10 +250,13 @@ returns `404`.
 
 ## Testing
 
-The suite covers the tokenizer (ASCII/Unicode/CJK/case folding), index
-semantics (weighting, replacement, removal), BM25 ordering, HTML extraction,
-crawler behavior (dedup, caps, onion detection) and end-to-end engine flows.
-Run with `ctest --test-dir build --output-on-failure`.
+The suite covers the tokenizer (ASCII/Unicode/CJK/case folding **and malformed
+UTF-8 handling**), index semantics (weighting, replacement, removal), **BM25
+mathematical edge cases** (empty index, ubiquitous vs rare terms, degenerate
+`k1`/`b`, finite-score guards), HTML extraction, the advanced frontier
+(priority, politeness, robots, dedup, caps), persistence round-trips, the JSON
+gateway, and **simulated SOCKS5 timeout/failure recovery**. Run with
+`ctest --test-dir build --output-on-failure`.
 
 ## License
 

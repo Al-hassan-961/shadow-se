@@ -213,4 +213,32 @@ bool loadEncryptedSnapshot(const std::string& path, const std::string& password,
     return true;
 }
 
+bool saveSnapshot(const std::string& path, const std::vector<Document>& docs,
+                  std::string* err) {
+    const std::string data = serializeDocuments(docs);
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    if (!ofs) {
+        if (err) *err = "cannot open " + path + " for writing";
+        return false;
+    }
+    ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
+    ofs.close();
+    if (!ofs) {
+        if (err) *err = "failed to write " + path;
+        return false;
+    }
+    return true;
+}
+
+bool loadSnapshot(const std::string& path, std::vector<Document>* docs, std::string* err) {
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs) {
+        if (err) *err = "cannot open " + path + " for reading";
+        return false;
+    }
+    const std::string data((std::istreambuf_iterator<char>(ifs)),
+                           std::istreambuf_iterator<char>());
+    return deserializeDocuments(data, docs, err);
+}
+
 } // namespace shadowse

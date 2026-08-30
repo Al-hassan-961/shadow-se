@@ -189,8 +189,10 @@ void printHelpMenu() {
     std::cout << UIColors::BOLD << "\nAVAILABLE COMMANDS:\n" << UIColors::RESET;
     std::cout << "  search <query>         - Run a BM25 inverted index query (clearweb and .onion)\n";
     std::cout << "  crawl <url>            - Dispatch the asynchronous sandbox crawler to ingest a target\n";
-    std::cout << "  save <path>            - Encrypt the index to a snapshot (XChaCha20-Poly1305 + Argon2id)\n";
-    std::cout << "  load <path>            - Load an encrypted snapshot into the index\n";
+    std::cout << "  save   <path>            - Encrypt the index to a snapshot (XChaCha20-Poly1305 + Argon2id)\n";
+    std::cout << "  load   <path>            - Load an encrypted snapshot into the index\n";
+    std::cout << "  save-state <path>        - Persist the index to disk (fast, plain binary)\n";
+    std::cout << "  load-state <path>        - Reload a persisted index from disk\n";
     std::cout << "  admin                  - Open the local admin-only dashboard (Tor/onion/index/crawler)\n";
     std::cout << "  status                 - Show Tor probe, index statistics and crawler queue\n";
     std::cout << "  help                   - Display this command instruction menu\n";
@@ -388,6 +390,32 @@ int main(int argc, char** argv) {
                 std::cout << "Usage: load <path>\n";
             } else {
                 handleLoad(*engine, path);
+            }
+        } else if (input.rfind("save-state ", 0) == 0) {
+            const std::string path = trim(input.substr(11));
+            std::string err;
+            if (path.empty()) {
+                std::cout << "Usage: save-state <path>\n";
+            } else if (engine->saveState(path, &err)) {
+                std::cout << UIColors::GREEN << "[✔] State persisted to " << path
+                          << " (" << engine->index().documentCount() << " documents)"
+                          << UIColors::RESET << "\n";
+            } else {
+                std::cout << UIColors::RED << "[!] Save failed: " << err << UIColors::RESET
+                          << "\n";
+            }
+        } else if (input.rfind("load-state ", 0) == 0) {
+            const std::string path = trim(input.substr(11));
+            std::string err;
+            if (path.empty()) {
+                std::cout << "Usage: load-state <path>\n";
+            } else if (engine->loadState(path, &err)) {
+                std::cout << UIColors::GREEN << "[✔] State loaded from " << path
+                          << " (" << engine->index().documentCount() << " documents)"
+                          << UIColors::RESET << "\n";
+            } else {
+                std::cout << UIColors::RED << "[!] Load failed: " << err << UIColors::RESET
+                          << "\n";
             }
         } else if (!input.empty()) {
             // Direct input is treated as a search query for ease of use.

@@ -55,6 +55,10 @@ public:
     bool loadEncrypted(const std::string& path, const std::string& password,
                        std::string* err);
 
+    // Plain binary persistence (fast disk round-trip between runs).
+    bool saveState(const std::string& path, std::string* err) const;
+    bool loadState(const std::string& path, std::string* err);
+
     // Drains and joins the crawler.
     void shutdown();
 
