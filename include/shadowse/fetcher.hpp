@@ -2,6 +2,9 @@
 // Shadow SE - fetcher abstraction (network HTTP client or deterministic stub).
 #pragma once
 
+#include "shadowse/tor_proxy_manager.hpp"
+
+#include <memory>
 #include <string>
 
 namespace shadowse {
@@ -27,17 +30,18 @@ public:
     std::string name() const override { return "stub"; }
 };
 
-// libcurl backed fetcher with optional SOCKS5h routing (for .onion targets).
+// libcurl backed fetcher with Tor proxy routing via a TorProxyManager
+// (SOCKS5h for .onion, per-request proxy selection, failover + retries).
 // Compiled only when CMake finds libcurl (HAVE_CURL).
 class CurlFetcher : public Fetcher {
 public:
-    explicit CurlFetcher(std::string socks5Proxy = "", long timeoutMs = 10000);
+    explicit CurlFetcher(std::shared_ptr<TorProxyManager> manager, long timeoutMs = 10000);
     ~CurlFetcher() override;
     FetchResult fetch(const std::string& url) override;
     std::string name() const override { return "libcurl"; }
 
 private:
-    std::string proxy_;
+    std::shared_ptr<TorProxyManager> manager_;
     long timeoutMs_;
 };
 

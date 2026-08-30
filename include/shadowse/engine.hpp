@@ -7,7 +7,9 @@
 #include "shadowse/fetcher.hpp"
 #include "shadowse/inverted_index.hpp"
 #include "shadowse/tor_proxy.hpp"
+#include "shadowse/tor_proxy_manager.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -21,6 +23,10 @@ public:
         bool useStubFetcher = true;   // deterministic demo mode
         std::string torHost = "127.0.0.1";
         std::uint16_t torPort = 9050;
+        std::vector<std::string> torProxies;          // extra "host:port" endpoints
+        bool useProxyPool = false;                    // --tor-pool
+        std::size_t onionRetries = 0;                 // --onion-retries
+        std::chrono::seconds circuitRotateInterval{0}; // --circuit-rotate
         std::size_t crawlerWorkers = 2;
         std::size_t crawlerMaxPages = 64;
         std::uint32_t crawlerMaxDepth = 2;
@@ -67,11 +73,14 @@ public:
     Crawler& crawler() { return *crawler_; }
     const Crawler& crawler() const { return *crawler_; }
     const Fetcher& fetcher() const { return *fetcher_; }
+    TorProxyManager& torManager() { return *torManager_; }
+    const TorProxyManager& torManager() const { return *torManager_; }
     const TorProbeResult& lastTor() const { return lastTor_; }
 
 private:
     Config cfg_;
     InvertedIndex index_;
+    std::shared_ptr<TorProxyManager> torManager_;  // shared with the fetcher
     std::shared_ptr<Fetcher> fetcher_;
     std::unique_ptr<Crawler> crawler_;
     TorProbeResult lastTor_;

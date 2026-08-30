@@ -50,6 +50,7 @@ add_library(shadowse_core STATIC
   src/json.cpp
   src/bloom_filter.cpp
   src/robots_txt.cpp
+  src/tor_proxy_manager.cpp
   src/gateway.cpp
 )
 target_include_directories(shadowse_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -146,6 +147,7 @@ if(SHADOWSE_BUILD_TESTS)
     tests/test_utf8.cpp
     tests/test_bm25_edges.cpp
     tests/test_socks5.cpp
+    tests/test_tor_manager.cpp
   )
   target_link_libraries(shadow-se-tests PRIVATE shadowse_core)
   add_test(NAME shadowse-tests COMMAND shadow-se-tests)

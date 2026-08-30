@@ -75,6 +75,12 @@ FetchResult StubFetcher::fetch(const std::string& url) {
 
 #ifdef HAVE_CURL
 
+#include <curl/curl.h>
+
+#include <chrono>
+#include <mutex>
+#include <thread>
+
 namespace shadowse {
 
 namespace {
@@ -88,10 +94,27 @@ std::size_t writeCallback(char* ptr, std::size_t size, std::size_t nmemb, void* 
     return bytes;
 }
 
+// Transport/proxy failures are retryable (failover); HTTP-level and
+// protocol-level errors are not.
+bool isTransientCurlError(CURLcode code) {
+    switch (code) {
+        case CURLE_COULDNT_CONNECT:
+        case CURLE_COULDNT_RESOLVE_PROXY:
+        case CURLE_OPERATION_TIMEDOUT:
+        case CURLE_SEND_ERROR:
+        case CURLE_RECV_ERROR:
+        case CURLE_PROXY:
+        case CURLE_HTTP2:
+            return true;
+        default:
+            return false;
+    }
+}
+
 } // namespace
 
-CurlFetcher::CurlFetcher(std::string socks5Proxy, long timeoutMs)
-    : proxy_(std::move(socks5Proxy)), timeoutMs_(timeoutMs) {
+CurlFetcher::CurlFetcher(std::shared_ptr<TorProxyManager> manager, long timeoutMs)
+    : manager_(std::move(manager)), timeoutMs_(timeoutMs) {
     std::call_once(g_curlInitFlag, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
 }
 
@@ -99,51 +122,87 @@ CurlFetcher::~CurlFetcher() = default;
 
 FetchResult CurlFetcher::fetch(const std::string& url) {
     FetchResult result;
-    if (proxy_.empty() && url.find(".onion") != std::string::npos) {
-        result.error = "onion target requires Tor; SOCKS5 proxy is not configured (run 'status')";
-        return result;
+    const bool onion = url.find(".onion") != std::string::npos;
+    const std::size_t maxTries = manager_ ? 1 + manager_->maxRetries(url) : 1;
+
+    for (std::size_t attempt = 0; attempt < maxTries; ++attempt) {
+        if (attempt > 0 && manager_) {
+            std::this_thread::sleep_for(manager_->backoff(attempt - 1));
+        }
+
+        TorEndpoint ep;
+        if (manager_) {
+            ep = manager_->selectProxy(url);
+        }
+        const std::string proxy = (ep.host.empty() || ep.port == 0) ? "" : socks5Url(ep);
+        if (onion && proxy.empty()) {
+            result.error =
+                "onion target requires Tor; no healthy SOCKS5 proxy available (run 'status')";
+            break;  // not retryable without a proxy
+        }
+
+        CURL* curl = curl_easy_init();
+        if (curl == nullptr) {
+            result.error = "curl_easy_init() failed";
+            break;
+        }
+        std::string body;
+        char errbuf[CURL_ERROR_SIZE] = {0};
+        const auto start = std::chrono::steady_clock::now();
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeoutMs_);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, timeoutMs_ / 2);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT,
+                         "Mozilla/5.0 (compatible; ShadowSE/1.0; +https://github.com/alhassanshehade/shadow-se)");
+        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+        curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+
+        if (!proxy.empty()) {
+            curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
+            // SOCKS5 username/password = Tor stream isolation (fresh circuit
+            // per isolation token).
+            if (!ep.username.empty()) {
+                curl_easy_setopt(curl, CURLOPT_PROXYUSERNAME, ep.username.c_str());
+                curl_easy_setopt(curl, CURLOPT_PROXYPASSWORD, ep.password.c_str());
+            }
+        }
+
+        const CURLcode code = curl_easy_perform(curl);
+        long httpCode = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+        curl_easy_cleanup(curl);
+        const auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start);
+
+        if (code == CURLE_OK && httpCode < 400) {
+            if (manager_ && !ep.host.empty()) {
+                manager_->reportSuccess(ep.host, ep.port, latency);
+            }
+            result.ok = true;
+            result.html = std::move(body);
+            return result;
+        }
+
+        result.error = code != CURLE_OK
+                           ? (errbuf[0] != '\0' ? std::string(errbuf) : curl_easy_strerror(code))
+                           : "HTTP " + std::to_string(httpCode);
+        if (manager_ && !ep.host.empty()) {
+            manager_->reportFailure(ep.host, ep.port, result.error);
+        }
+        if (httpCode >= 400) {
+            break;  // HTTP-level failure: not retryable
+        }
+        if (!isTransientCurlError(code) && !onion) {
+            break;  // non-transient, non-onion failure: not retryable
+        }
+        // Otherwise (transient or onion): retry - the manager fails over to
+        // another proxy endpoint on the next selectProxy().
     }
-    CURL* curl = curl_easy_init();
-    if (curl == nullptr) {
-        result.error = "curl_easy_init() failed";
-        return result;
-    }
-
-    std::string body;
-    char errbuf[CURL_ERROR_SIZE] = {0};
-
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeoutMs_);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, timeoutMs_ / 2);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT,
-                     "Mozilla/5.0 (compatible; ShadowSE/1.0; +https://github.com/alhassanshehade/shadow-se)");
-    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
-    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
-
-    if (!proxy_.empty()) {
-        curl_easy_setopt(curl, CURLOPT_PROXY, proxy_.c_str());
-    }
-
-    const CURLcode code = curl_easy_perform(curl);
-    long httpCode = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-    curl_easy_cleanup(curl);
-
-    if (code != CURLE_OK) {
-        result.error = errbuf[0] != '\0' ? std::string(errbuf) : curl_easy_strerror(code);
-        return result;
-    }
-    if (httpCode >= 400) {
-        result.error = "HTTP " + std::to_string(httpCode);
-        return result;
-    }
-
-    result.ok = true;
-    result.html = std::move(body);
     return result;
 }
 
@@ -153,7 +212,7 @@ FetchResult CurlFetcher::fetch(const std::string& url) {
 
 namespace shadowse {
 
-CurlFetcher::CurlFetcher(std::string, long) {}
+CurlFetcher::CurlFetcher(std::shared_ptr<TorProxyManager>, long) {}
 
 CurlFetcher::~CurlFetcher() = default;
 

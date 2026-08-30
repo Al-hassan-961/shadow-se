@@ -12,17 +12,23 @@
 namespace shadowse {
 
 Engine::Engine(Config cfg) : cfg_(cfg) {
-    // A real SOCKS5 probe up front: refused connections return instantly,
-    // so this only costs time when the port is silently filtered.
-    lastTor_ = probeTor();
+    // Build the endpoint list: the configured default endpoint plus any
+    // extra --tor-proxy endpoints.
+    std::vector<TorEndpoint> endpoints;
+    endpoints.push_back(TorEndpoint{cfg_.torHost, cfg_.torPort, {}, {}});
+    const std::vector<TorEndpoint> extra = parseProxyList(cfg_.torProxies);
+    endpoints.insert(endpoints.end(), extra.begin(), extra.end());
+
+    TorProxyManager::Options mopts;
+    mopts.proxies = std::move(endpoints);
+    mopts.onionRetries = cfg_.onionRetries;
+    mopts.circuitRotateInterval = cfg_.circuitRotateInterval;
+    torManager_ = makeDefaultTorProxyManager(mopts);
+    lastTor_ = torManager_->probe();
 
 #ifdef HAVE_CURL
     if (!cfg_.useStubFetcher) {
-        std::string proxy;
-        if (lastTor_.status == TorStatus::Up) {
-            proxy = "socks5h://" + cfg_.torHost + ":" + std::to_string(cfg_.torPort);
-        }
-        fetcher_ = std::make_shared<CurlFetcher>(proxy);
+        fetcher_ = std::make_shared<CurlFetcher>(torManager_);
     }
 #endif
     if (!fetcher_) {
@@ -41,7 +47,7 @@ Engine::~Engine() {
 }
 
 TorProbeResult Engine::probeTor() {
-    lastTor_ = shadowse::probeTor(cfg_.torHost, cfg_.torPort);
+    lastTor_ = torManager_->probe();
     return lastTor_;
 }
 
