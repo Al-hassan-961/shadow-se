@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Shadow SE - one-command launcher. Install it on your PATH with `make install`
+# (or `./install.sh`), then start the website from anywhere with just:
+#
+#   shadow-se          # build + start web UI + admin + JSON API, open browser
+#   shadow-se run      # ... and drop straight into the terminal UI
+#   shadow-se onion    # ... and also bring up the stealth onion service
+#   shadow-se stop     # stop everything
+#   shadow-se status   # show whether the site is running
+#
+# It locates the repository through its own install path, so it works no matter
+# which directory you're in.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+
+WEB_PORT="${WEB_PORT:-8080}"
+
+usage() {
+    cat <<EOF
+Shadow SE - one-command site launcher.
+
+Usage: shadow-se [command]
+
+  (no command)  Start the website (web UI + admin + JSON API), open your
+                browser, and show an interactive menu.
+  run           Start the site and drop into the terminal UI (search/crawl).
+  onion         Start the site and also bring up the stealth onion service.
+  stop          Stop everything (waits for graceful shutdown).
+  status        Show whether the site is running.
+  help          Show this help.
+
+Ports/mode overrides: WEB_PORT ADMIN_PORT GATEWAY_PORT MODE (stub|curl).
+EOF
+}
+
+case "${1:-}" in
+    ""|start) bash "$ROOT/start.sh" ;;
+    run)      bash "$ROOT/start.sh" run ;;
+    onion)    bash "$ROOT/start.sh" onion ;;
+    stop)     bash "$ROOT/stop.sh" ;;
+    status)
+        up() {
+            if curl -s -o /dev/null --max-time 1 "$1" 2>/dev/null; then printf 'up'; else printf 'down'; fi
+        }
+        web=$(up "http://127.0.0.1:$WEB_PORT/")
+        admin=$(up "http://127.0.0.1:${ADMIN_PORT:-8081}/healthz")
+        gw=$(up "http://127.0.0.1:${GATEWAY_PORT:-8090}/status")
+        echo "web $web · admin $admin · gateway $gw"
+        if [ "$web" = "up" ]; then
+            echo "Site is running at http://127.0.0.1:$WEB_PORT/"
+        else
+            echo "Site is not running. Start it with: shadow-se"
+        fi
+        ;;
+    help|-h|--help) usage ;;
+    *) echo "shadow-se: unknown command '$1'"; usage; exit 1 ;;
+esac
