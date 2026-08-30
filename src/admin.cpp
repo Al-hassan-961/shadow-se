@@ -241,6 +241,12 @@ void AdminServer::handleClient(int fd) {
     std::string method, target;
     line >> method >> target;
 
+    // Liveness probe (no auth) for the site launcher health checks.
+    if (method == "GET" && target.rfind("/healthz", 0) == 0) {
+        sendHtml(fd, 200, "OK", "ok");
+        return;
+    }
+
     // Only the dashboard root is served.
     bool authorized = false;
     if (method == "GET" && target.rfind("/", 0) == 0 && target.find("..") == std::string::npos) {

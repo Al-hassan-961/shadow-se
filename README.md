@@ -15,6 +15,19 @@ High-performance terminal interface and engine core for **clearweb** and
 
 ---
 
+## One command to start the website
+
+```bash
+./start.sh          # build (if needed) + run web UI + admin dashboard + JSON API
+./start.sh onion    # ... and also bring up the stealth onion service
+./stop.sh           # stop everything (waits for graceful shutdown)
+```
+
+Or `make run` / `make stop`. `start.sh` is idempotent (it won't double-start a
+service that's already answering) and prints every URL, including the admin
+token. Ports/mode are overridable: `WEB_PORT=8080 ADMIN_PORT=8081
+GATEWAY_PORT=8090 MODE=stub`.
+
 ## Quick start
 
 ```bash

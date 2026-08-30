@@ -40,6 +40,7 @@ int main(int argc, char** argv) {
     std::uint16_t webPort = 8080;
     std::string token, loadPath, password;
     std::string onionDir = "onion";
+    bool serveWeb = true;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -55,6 +56,8 @@ int main(int argc, char** argv) {
             token = next();
         } else if (a == "--onion-dir") {
             onionDir = next();
+        } else if (a == "--no-web") {
+            serveWeb = false;
         } else if (a == "--stub") {
             cfg.useStubFetcher = true;
         } else if (a == "--curl") {
@@ -109,18 +112,20 @@ int main(int argc, char** argv) {
             activity.add(std::move(ev));
         });
 
-    // Public web UI (serves the onion).
-    WebServer::Options wopts;
-    wopts.port = webPort;
-    wopts.pageTitle = "Shadow SE";
-    WebServer web(engine, wopts);
-    {
+    // Public web UI (serves the onion) - optional: the launcher runs it as a
+    // separate process, so use --no-web to avoid double-binding the port.
+    std::unique_ptr<WebServer> web;
+    if (serveWeb) {
+        WebServer::Options wopts;
+        wopts.port = webPort;
+        wopts.pageTitle = "Shadow SE";
+        web = std::make_unique<WebServer>(engine, wopts);
         std::string err;
-        if (!web.start(&err)) {
+        if (!web->start(&err)) {
             std::cerr << "Failed to start web UI on port " << webPort << ": " << err << "\n";
             return 1;
         }
-        web.runAsync();
+        web->runAsync();
     }
 
     // Admin dashboard.
@@ -139,18 +144,25 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "==============================================================\n";
-    std::cout << "  Public web UI (onion) : http://127.0.0.1:" << web.port() << "/\n";
+    if (web) {
+        std::cout << "  Public web UI (onion) : http://127.0.0.1:" << web->port() << "/\n";
+    } else {
+        std::cout << "  Public web UI         : running separately (see start.sh)\n";
+    }
     std::cout << "  ADMIN DASHBOARD       : http://127.0.0.1:" << admin.port()
               << "/?t=" << admin.token() << "\n";
     std::cout << "  Admin token           : " << admin.token() << "\n";
     std::cout << "  (loopback only + token required; Ctrl+C to stop)\n";
     std::cout << "==============================================================\n";
+    std::cout << std::flush;  // ensure the token URL is in the log promptly
 
     while (!g_stop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
     admin.stop();
-    web.stop();
+    if (web) {
+        web->stop();
+    }
     engine.shutdown();
     std::cout << "\n[*] Admin dashboard stopped.\n";
     return 0;

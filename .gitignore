@@ -28,3 +28,7 @@ onion/client.keys
 # Encrypted snapshots / scratch
 *.enc
 
+# Site launcher runtime
+.shadow.pids
+.shadow-logs/
+

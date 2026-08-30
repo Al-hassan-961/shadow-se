@@ -9,6 +9,10 @@
 #include <limits>
 #include <thread>
 
+#ifndef _WIN32
+#include <sys/socket.h>
+#endif
+
 namespace shadowse {
 
 using json::Value;
@@ -156,6 +160,16 @@ void JsonGateway::setupHandlers() {
     srv_.set_keep_alive_max_count(1);
     srv_.set_read_timeout(10, 0);
     srv_.set_write_timeout(10, 0);
+
+    // Allow quick rebinds after a stop (TIME_WAIT) so `./start.sh` is
+    // idempotent across rapid restarts.
+#ifndef _WIN32
+    srv_.set_socket_options([](socket_t sock) {
+        (void)sock;
+        int one = 1;
+        ::setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, static_cast<socklen_t>(sizeof(one)));
+    });
+#endif
 }
 
 } // namespace shadowse
