@@ -11,6 +11,7 @@
 #include "shadowse/admin.hpp"
 #include "shadowse/crypto.hpp"
 #include "shadowse/engine.hpp"
+#include "shadowse/tor_args.hpp"
 #include "shadowse/web_server.hpp"
 
 #include <atomic>
@@ -58,6 +59,11 @@ int main(int argc, char** argv) {
             onionDir = next();
         } else if (a == "--no-web") {
             serveWeb = false;
+        } else if (a == "--tor-pool") {
+            shadowse::parseTorFlag(cfg, a, "");
+        } else if (a == "--tor-proxy" || a == "--onion-retries" ||
+                   a == "--circuit-rotate") {
+            shadowse::parseTorFlag(cfg, a, next());
         } else if (a == "--stub") {
             cfg.useStubFetcher = true;
         } else if (a == "--curl") {
@@ -68,8 +74,9 @@ int main(int argc, char** argv) {
             password = next();
         } else if (a == "--help" || a == "-h") {
             std::cout << "Usage: shadow-se-admin [--port 8081] [--web-port 8080] "
-                         "[--token T] [--onion-dir DIR] [--stub|--curl] "
-                         "[--load SNAP --password PW]\n";
+                         "[--token T] [--onion-dir DIR] [--stub|--curl] [--tor-pool] "
+                         "[--tor-proxy host:port,...] [--onion-retries N] "
+                         "[--circuit-rotate SECONDS] [--load SNAP --password PW]\n";
             return 0;
         } else {
             std::cerr << "Unknown option: " << a << " (try --help)\n";

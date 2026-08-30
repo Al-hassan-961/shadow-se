@@ -23,7 +23,8 @@ Engine::Engine(Config cfg) : cfg_(cfg) {
     mopts.proxies = std::move(endpoints);
     mopts.onionRetries = cfg_.onionRetries;
     mopts.circuitRotateInterval = cfg_.circuitRotateInterval;
-    torManager_ = makeDefaultTorProxyManager(mopts);
+    torManager_ = cfg_.useProxyPool ? makePooledTorProxyManager(mopts)
+                                    : makeDefaultTorProxyManager(mopts);
     lastTor_ = torManager_->probe();
 
 #ifdef HAVE_CURL

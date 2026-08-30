@@ -183,6 +183,34 @@ delays**, deduplicates URLs with an exact set backed by a **Bloom filter**, and
 honors **robots.txt** (cached per origin, fail-open on fetch errors). `Crawler::Options`
 gains `domainDelay`, `obeyRobots`, `userAgent`, and `bloomExpected`.
 
+## Advanced Tor configuration
+
+All Tor networking goes through a `TorProxyManager` (see
+`include/shadowse/tor_proxy_manager.hpp`). Two implementations exist: the
+default single-proxy manager (byte-for-byte the original behavior) and a
+**pooled** manager with round-robin load balancing, failover with cooldowns,
+and per-domain circuit isolation.
+
+```bash
+./build/shadow-se --curl --tor-pool \
+    --tor-proxy 127.0.0.1:9050,127.0.0.1:9051 \
+    --onion-retries 5 --circuit-rotate 600
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--tor-proxy host:port,...` | One or more SOCKS5 Tor endpoints (default `127.0.0.1:9050`). |
+| `--tor-pool` | Use the pooled manager: load balancing + automatic failover. |
+| `--onion-retries N` | Retry count for `.onion` fetches, exponential backoff with jitter (default `0` = single shot, as before). |
+| `--circuit-rotate SECONDS` | Rotate the active circuit/proxy selection every N seconds (`0` = never). |
+
+Defaults mirror the original single-proxy behavior and `--stub` mode is
+unaffected. Circuit isolation uses Tor's SOCKS5 username/password extension:
+each domain gets a stable isolation token, forcing a fresh circuit per domain.
+Control-port integration (`--tor-control`), exit-country filtering
+(`--exclude-country`), and Prometheus Tor metrics are reserved in the interface
+and arrive in later phases.
+
 ## Web front end (privacy hardened)
 
 ```bash

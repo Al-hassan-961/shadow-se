@@ -8,6 +8,7 @@
 // Binds to 127.0.0.1 only. Expose it exclusively through a Tor onion service;
 // see the onion/ directory for a stealth (client-auth) setup.
 #include "shadowse/engine.hpp"
+#include "shadowse/tor_args.hpp"
 #include "shadowse/web_server.hpp"
 
 #include <atomic>
@@ -51,6 +52,11 @@ int main(int argc, char** argv) {
             cfg.useStubFetcher = true;
         } else if (a == "--curl") {
             cfg.useStubFetcher = false;
+        } else if (a == "--tor-pool") {
+            shadowse::parseTorFlag(cfg, a, "");
+        } else if (a == "--tor-proxy" || a == "--onion-retries" ||
+                   a == "--circuit-rotate") {
+            shadowse::parseTorFlag(cfg, a, next());
         } else if (a == "--load") {
             loadPath = next();
         } else if (a == "--password") {
@@ -60,8 +66,10 @@ int main(int argc, char** argv) {
         } else if (a == "--no-seed") {
             seed = false;
         } else if (a == "--help" || a == "-h") {
-            std::cout << "Usage: shadow-se-web [--port N] [--stub|--curl] "
-                         "[--load SNAPSHOT --password PW] [--no-seed] [--title T]\n";
+            std::cout << "Usage: shadow-se-web [--port N] [--stub|--curl] [--tor-pool] "
+                         "[--tor-proxy host:port,...] [--onion-retries N] "
+                         "[--circuit-rotate SECONDS] [--load SNAPSHOT --password PW] "
+                         "[--no-seed] [--title T]\n";
             return 0;
         } else {
             std::cerr << "Unknown option: " << a << " (try --help)\n";

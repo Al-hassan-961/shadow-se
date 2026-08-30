@@ -7,6 +7,7 @@
 // Usage:
 //   shadow-se-gateway [--port 8090] [--stub|--curl] [--load SNAP --password PW]
 #include "shadowse/engine.hpp"
+#include "shadowse/tor_args.hpp"
 #include "shadowse/gateway.hpp"
 
 #include <atomic>
@@ -38,13 +39,19 @@ int main(int argc, char** argv) {
             cfg.useStubFetcher = true;
         } else if (a == "--curl") {
             cfg.useStubFetcher = false;
+        } else if (a == "--tor-pool") {
+            shadowse::parseTorFlag(cfg, a, "");
+        } else if (a == "--tor-proxy" || a == "--onion-retries" ||
+                   a == "--circuit-rotate") {
+            shadowse::parseTorFlag(cfg, a, next());
         } else if (a == "--load") {
             loadPath = next();
         } else if (a == "--password") {
             password = next();
         } else if (a == "--help" || a == "-h") {
-            std::cout << "Usage: shadow-se-gateway [--port 8090] [--stub|--curl] "
-                         "[--load SNAP --password PW]\n";
+            std::cout << "Usage: shadow-se-gateway [--port 8090] [--stub|--curl] [--tor-pool] "
+                         "[--tor-proxy host:port,...] [--onion-retries N] "
+                         "[--circuit-rotate SECONDS] [--load SNAP --password PW]\n";
             return 0;
         } else {
             std::cerr << "Unknown option: " << a << " (try --help)\n";

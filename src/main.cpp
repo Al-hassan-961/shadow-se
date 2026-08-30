@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "shadowse/admin.hpp"
+#include "shadowse/tor_args.hpp"
 
 #ifdef __unix__
 #include <termios.h>
@@ -260,8 +261,17 @@ int main(int argc, char** argv) {
             cfg.useStubFetcher = true;
         } else if (arg == "--curl") {
             cfg.useStubFetcher = false;
+        } else if (arg == "--tor-proxy" || arg == "--onion-retries" ||
+                   arg == "--circuit-rotate") {
+            std::string value = (i + 1 < argc) ? argv[i + 1] : "";
+            if (!value.empty()) ++i;
+            shadowse::parseTorFlag(cfg, arg, value);
+        } else if (arg == "--tor-pool") {
+            shadowse::parseTorFlag(cfg, arg, "");
         } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: shadow-se [--stub|--curl]\n";
+            std::cout << "Usage: shadow-se [--stub|--curl] [--tor-pool] "
+                         "[--tor-proxy host:port,...] [--onion-retries N] "
+                         "[--circuit-rotate SECONDS]\n";
             return 0;
         } else {
             std::cout << "Unknown option: " << arg << " (try --help)\n";
