@@ -15,3 +15,16 @@ compile_commands.json
 *.swp
 .DS_Store
 .buildcheck/
+
+# Onion service runtime state (contains secrets - never commit)
+onion/tor_data/
+onion/tor.out
+onion/tor.log
+onion/tor.pid
+onion/web.log
+onion/torrc
+onion/client.keys
+
+# Encrypted snapshots / scratch
+*.enc
+

@@ -36,7 +36,10 @@ void InvertedIndex::removePostings(
 
 std::uint64_t InvertedIndex::addDocument(const Document& doc) {
     std::lock_guard<std::mutex> lock(mtx_);
+    return addDocumentLocked(doc);
+}
 
+std::uint64_t InvertedIndex::addDocumentLocked(const Document& doc) {
     std::uint64_t id = 0;
     const auto urlIt = urlToId_.find(doc.url);
     if (urlIt != urlToId_.end()) {
@@ -93,6 +96,31 @@ void InvertedIndex::removeDocument(std::uint64_t docId) {
     docLengths_.erase(docId);
     docTerms_.erase(docId);
     docs_.erase(docIt);
+}
+
+void InvertedIndex::clear() {
+    std::lock_guard<std::mutex> lock(mtx_);
+    postings_.clear();
+    urlToId_.clear();
+    docs_.clear();
+    docTerms_.clear();
+    docLengths_.clear();
+    nextId_ = 1;
+    totalTerms_ = 0;
+}
+
+void InvertedIndex::replaceAll(const std::vector<Document>& docs) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    postings_.clear();
+    urlToId_.clear();
+    docs_.clear();
+    docTerms_.clear();
+    docLengths_.clear();
+    nextId_ = 1;
+    totalTerms_ = 0;
+    for (const Document& d : docs) {
+        addDocumentLocked(d);
+    }
 }
 
 const std::vector<Posting>* InvertedIndex::postings(std::string_view term) const {

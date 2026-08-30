@@ -32,6 +32,13 @@ public:
     // Removes a document by id. No-op when the id is unknown.
     void removeDocument(std::uint64_t docId);
 
+    // Removes all documents and postings.
+    void clear();
+
+    // Atomically replaces the entire index contents (used when loading an
+    // encrypted snapshot).
+    void replaceAll(const std::vector<Document>& docs);
+
     // Postings list for a term, or nullptr when the term is not indexed.
     const std::vector<Posting>* postings(std::string_view term) const;
 
@@ -45,6 +52,7 @@ public:
     std::vector<Document> allDocuments() const;
 
 private:
+    std::uint64_t addDocumentLocked(const Document& doc);
     void indexText(std::uint64_t docId, const std::string& text,
                    std::unordered_map<std::string, std::uint32_t>& freqs) const;
     void removePostings(std::uint64_t docId,

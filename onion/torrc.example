@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+# Shadow SE - hardened stealth onion service config (reference).
+# onion/setup.sh generates a live onion/torrc from this shape, substituting
+# absolute paths. Enable v3 client authorization by placing client public keys
+# in <HiddenServiceDir>/authorized_clients/<name>.auth (see CLIENT.md).
+#
+#   descriptor:x25519:<client-public-key-base32>
+
+SOCKSPort 9050
+Log notice file /path/to/shadow-se/onion/tor_data/tor.log
+DataDirectory /path/to/shadow-se/onion/tor_data
+
+# This host is a client + onion service, never a relay.
+ExitRelay 0
+BridgeRelay 0
+PublishServerDescriptor 0
+SocksPolicy accept 127.0.0.1
+SocksPolicy reject *
+
+# Stealth onion service (v3).
+HiddenServiceDir /path/to/shadow-se/onion/tor_data/hidden
+HiddenServiceVersion 3
+HiddenServicePort 80 127.0.0.1:8080
+HiddenServiceEnableIntroDoSDefense 1
+
+# To browse your own onion from this host, point Tor at your client keys:
+# ClientOnionAuthDir /path/to/shadow-se/onion/tor_data/client_auth

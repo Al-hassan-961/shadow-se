@@ -2,6 +2,7 @@
 // Shadow SE - engine facade: index + ranking + Tor routing + crawler.
 #include "shadowse/engine.hpp"
 
+#include "shadowse/snapshot.hpp"
 #include "shadowse/tokenizer.hpp"
 
 #include <algorithm>
@@ -117,6 +118,22 @@ void Engine::seedDemoData() {
     index_.addDocument(d2);
     index_.addDocument(d3);
     index_.addDocument(d4);
+}
+
+bool Engine::saveEncrypted(const std::string& path, const std::string& password,
+                           std::string* err) const {
+    return saveEncryptedSnapshot(path, password, index_.allDocuments(), err);
+}
+
+bool Engine::loadEncrypted(const std::string& path, const std::string& password,
+                           std::string* err) {
+    std::vector<Document> docs;
+    if (!loadEncryptedSnapshot(path, password, &docs, err)) {
+        return false;
+    }
+    // Atomically replace the index with the loaded documents.
+    index_.replaceAll(docs);
+    return true;
 }
 
 std::string normalizeUrl(const std::string& input) {

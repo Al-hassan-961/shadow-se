@@ -48,6 +48,13 @@ public:
     // Loads the built-in demo corpus so the engine is useful out of the box.
     void seedDemoData();
 
+    // Encrypts the current index to `path` (XChaCha20-Poly1305, Argon2id KDF).
+    bool saveEncrypted(const std::string& path, const std::string& password,
+                       std::string* err) const;
+    // Replaces the index with the contents of an encrypted snapshot.
+    bool loadEncrypted(const std::string& path, const std::string& password,
+                       std::string* err);
+
     // Drains and joins the crawler.
     void shutdown();
 

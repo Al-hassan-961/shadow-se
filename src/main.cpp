@@ -24,6 +24,11 @@
 #include <thread>
 #include <vector>
 
+#ifdef __unix__
+#include <termios.h>
+#include <unistd.h>
+#endif
+
 using shadowse::Document;
 using shadowse::Engine;
 using shadowse::SourceType;
@@ -55,6 +60,57 @@ std::string trim(std::string s) {
                          [](unsigned char c) { return !std::isspace(c); }).base(),
             s.end());
     return s;
+}
+
+// Reads a password from the terminal without echoing it back (best effort).
+std::string readPassword(const std::string& prompt) {
+    std::string password;
+    std::cout << prompt << std::flush;
+#ifdef __unix__
+    termios oldt{};
+    const bool have_term = tcgetattr(STDIN_FILENO, &oldt) == 0;
+    if (have_term) {
+        termios newt = oldt;
+        newt.c_lflag &= ~static_cast<tcflag_t>(ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    }
+#endif
+    std::getline(std::cin, password);
+#ifdef __unix__
+    if (have_term) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    }
+#endif
+    std::cout << "\n";
+    return password;
+}
+
+void handleSave(Engine& engine, const std::string& path) {
+    const std::string pw = readPassword("  Encryption password: ");
+    if (pw.empty()) {
+        std::cout << UIColors::RED << "[!] Empty password rejected.\n" << UIColors::RESET;
+        return;
+    }
+    std::string err;
+    if (engine.saveEncrypted(path, pw, &err)) {
+        std::cout << UIColors::GREEN << "[✔] Encrypted snapshot saved to " << path
+                  << UIColors::RESET << "\n"
+                  << "    (" << engine.index().documentCount()
+                  << " documents; XChaCha20-Poly1305 + Argon2id)\n\n";
+    } else {
+        std::cout << UIColors::RED << "[!] Save failed: " << err << UIColors::RESET << "\n\n";
+    }
+}
+
+void handleLoad(Engine& engine, const std::string& path) {
+    const std::string pw = readPassword("  Encryption password: ");
+    std::string err;
+    if (engine.loadEncrypted(path, pw, &err)) {
+        std::cout << UIColors::GREEN << "[✔] Loaded " << engine.index().documentCount()
+                  << " documents from " << path << UIColors::RESET << "\n\n";
+    } else {
+        std::cout << UIColors::RED << "[!] Load failed: " << err << UIColors::RESET << "\n\n";
+    }
 }
 
 void printHeader() {
@@ -128,6 +184,8 @@ void printHelpMenu() {
     std::cout << UIColors::BOLD << "\nAVAILABLE COMMANDS:\n" << UIColors::RESET;
     std::cout << "  search <query>         - Run a BM25 inverted index query (clearweb and .onion)\n";
     std::cout << "  crawl <url>            - Dispatch the asynchronous sandbox crawler to ingest a target\n";
+    std::cout << "  save <path>            - Encrypt the index to a snapshot (XChaCha20-Poly1305 + Argon2id)\n";
+    std::cout << "  load <path>            - Load an encrypted snapshot into the index\n";
     std::cout << "  status                 - Show Tor probe, index statistics and crawler queue\n";
     std::cout << "  help                   - Display this command instruction menu\n";
     std::cout << "  exit / quit            - Drain the crawler and safely terminate\n\n";
@@ -279,6 +337,20 @@ int main(int argc, char** argv) {
             }
         } else if (input.rfind("crawl ", 0) == 0) {
             handleCrawl(*engine, trim(input.substr(6)));
+        } else if (input.rfind("save ", 0) == 0) {
+            const std::string path = trim(input.substr(5));
+            if (path.empty()) {
+                std::cout << "Usage: save <path>\n";
+            } else {
+                handleSave(*engine, path);
+            }
+        } else if (input.rfind("load ", 0) == 0) {
+            const std::string path = trim(input.substr(5));
+            if (path.empty()) {
+                std::cout << "Usage: load <path>\n";
+            } else {
+                handleLoad(*engine, path);
+            }
         } else if (!input.empty()) {
             // Direct input is treated as a search query for ease of use.
             handleSearch(*engine, input);

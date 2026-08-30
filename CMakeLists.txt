@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(shadowse VERSION 1.0.0 LANGUAGES CXX
+project(shadowse VERSION 1.1.0 LANGUAGES CXX
         DESCRIPTION "Shadow SE - secure clearweb & .onion search engine core")
 
 set(CMAKE_CXX_STANDARD 20)
@@ -8,10 +8,29 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SHADOWSE_BUILD_TESTS "Build the unit test suite" ON)
 option(SHADOWSE_USE_CURL "Use libcurl for real network fetching when available" ON)
+option(SHADOWSE_ENABLE_CRYPTO "Enable libsodium authenticated encryption" ON)
 option(SHADOWSE_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 
 find_package(Threads REQUIRED)
 find_package(CURL QUIET)
+
+# libsodium for XChaCha20-Poly1305 + Argon2id authenticated encryption.
+set(SODIUM_FOUND FALSE)
+if(SHADOWSE_ENABLE_CRYPTO)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(LIBSODIUM QUIET IMPORTED_TARGET libsodium)
+  endif()
+  if(LIBSODIUM_FOUND)
+    set(SODIUM_FOUND TRUE)
+  else()
+    find_library(SODIUM_LIBRARY NAMES sodium)
+    find_path(SODIUM_INCLUDE_DIR NAMES sodium.h)
+    if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
+      set(SODIUM_FOUND TRUE)
+    endif()
+  endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # Core library
@@ -24,6 +43,9 @@ add_library(shadowse_core STATIC
   src/fetcher.cpp
   src/crawler.cpp
   src/engine.cpp
+  src/crypto.cpp
+  src/snapshot.cpp
+  src/web_server.cpp
 )
 target_include_directories(shadowse_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(shadowse_core PUBLIC Threads::Threads)
@@ -35,6 +57,19 @@ if(CURL_FOUND AND SHADOWSE_USE_CURL)
   message(STATUS "Shadow SE: libcurl enabled - real HTTP/HTTPS/onion fetching")
 else()
   message(STATUS "Shadow SE: libcurl not found or disabled - stub fetcher only")
+endif()
+
+if(SODIUM_FOUND)
+  if(TARGET PkgConfig::LIBSODIUM)
+    target_link_libraries(shadowse_core PUBLIC PkgConfig::LIBSODIUM)
+  else()
+    target_include_directories(shadowse_core PUBLIC ${SODIUM_INCLUDE_DIR})
+    target_link_libraries(shadowse_core PUBLIC ${SODIUM_LIBRARY})
+  endif()
+  target_compile_definitions(shadowse_core PUBLIC HAVE_SODIUM)
+  message(STATUS "Shadow SE: libsodium enabled - XChaCha20-Poly1305 + Argon2id")
+else()
+  message(STATUS "Shadow SE: libsodium not found - encryption unavailable")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -53,6 +88,18 @@ add_executable(shadow-se src/main.cpp)
 target_link_libraries(shadow-se PRIVATE shadowse_core)
 
 # ---------------------------------------------------------------------------
+# Privacy-hardened web front end (served through the onion service)
+# ---------------------------------------------------------------------------
+add_executable(shadow-se-web src/web_main.cpp)
+target_link_libraries(shadow-se-web PRIVATE shadowse_core)
+
+# ---------------------------------------------------------------------------
+# Stealth onion client-authorization key generator
+# ---------------------------------------------------------------------------
+add_executable(se-keygen src/se_keygen.cpp)
+target_link_libraries(se-keygen PRIVATE shadowse_core)
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 if(SHADOWSE_BUILD_TESTS)
@@ -65,6 +112,9 @@ if(SHADOWSE_BUILD_TESTS)
     tests/test_crawler.cpp
     tests/test_tor.cpp
     tests/test_engine.cpp
+    tests/test_crypto.cpp
+    tests/test_snapshot.cpp
+    tests/test_web.cpp
   )
   target_link_libraries(shadow-se-tests PRIVATE shadowse_core)
   add_test(NAME shadowse-tests COMMAND shadow-se-tests)
