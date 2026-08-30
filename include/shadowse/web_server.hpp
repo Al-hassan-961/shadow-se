@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include <thread>
 
 namespace shadowse {
 
@@ -30,6 +31,7 @@ public:
     };
 
     explicit WebServer(Engine& engine, Options opts);
+    ~WebServer();
 
     // Binds + listens. Returns false with `err` on failure.
     bool start(std::string* err);
@@ -58,6 +60,7 @@ private:
     std::uint16_t port_ = 0;
     std::atomic<bool> running_{false};
     std::atomic<std::size_t> active_{0};
+    std::thread serveThread_;
 };
 
 } // namespace shadowse

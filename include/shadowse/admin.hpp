@@ -15,6 +15,7 @@
 #include <deque>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace shadowse {
@@ -55,6 +56,7 @@ struct AdminOptions {
 class AdminServer {
 public:
     AdminServer(Engine& engine, ActivityLog& log, AdminOptions opts);
+    ~AdminServer();
 
     bool start(std::string* err);
     void runForever();
@@ -75,6 +77,7 @@ private:
     int listenFd_ = -1;
     std::uint16_t port_ = 0;
     std::atomic<bool> running_{false};
+    std::thread serveThread_;
 };
 
 // Hex helper for the admin token (exposed for tests).

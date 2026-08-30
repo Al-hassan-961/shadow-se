@@ -144,6 +144,10 @@ AdminServer::AdminServer(Engine& engine, ActivityLog& log, AdminOptions opts)
     }
 }
 
+AdminServer::~AdminServer() {
+    stop();
+}
+
 bool AdminServer::start(std::string* err) {
 #ifndef _WIN32
     listenFd_ = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -196,7 +200,7 @@ void AdminServer::runForever() {
 }
 
 void AdminServer::runAsync() {
-    std::thread([this] { runForever(); }).detach();
+    serveThread_ = std::thread([this] { runForever(); });
 }
 
 void AdminServer::stop() {
@@ -208,6 +212,9 @@ void AdminServer::stop() {
         listenFd_ = -1;
     }
 #endif
+    if (serveThread_.joinable()) {
+        serveThread_.join();
+    }
 }
 
 void AdminServer::handleClient(int fd) {

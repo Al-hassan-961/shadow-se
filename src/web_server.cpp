@@ -22,6 +22,10 @@ namespace shadowse {
 
 WebServer::WebServer(Engine& engine, Options opts) : engine_(engine), opts_(std::move(opts)) {}
 
+WebServer::~WebServer() {
+    stop();
+}
+
 std::string WebServer::escapeHtml(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 16);
@@ -226,7 +230,7 @@ void WebServer::runForever() {
 }
 
 void WebServer::runAsync() {
-    std::thread([this] { runForever(); }).detach();
+    serveThread_ = std::thread([this] { runForever(); });
 }
 
 void WebServer::stop() {
@@ -238,6 +242,9 @@ void WebServer::stop() {
         listenFd_ = -1;
     }
 #endif
+    if (serveThread_.joinable()) {
+        serveThread_.join();
+    }
 }
 
 void WebServer::handleClient(int fd) {

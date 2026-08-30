@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <string>
+#include <thread>
 
 namespace shadowse {
 
@@ -24,6 +25,10 @@ public:
     };
 
     explicit JsonGateway(Engine& engine, Options opts);
+    ~JsonGateway();
+
+    JsonGateway(const JsonGateway&) = delete;
+    JsonGateway& operator=(const JsonGateway&) = delete;
 
     bool start(std::string* err);
     void runAsync();
@@ -39,6 +44,7 @@ private:
     Engine& engine_;
     Options opts_;
     httplib::Server srv_;
+    std::thread listenThread_;
     std::uint16_t port_ = 0;
 };
 

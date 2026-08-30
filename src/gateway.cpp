@@ -17,6 +17,10 @@ JsonGateway::JsonGateway(Engine& engine, Options opts) : engine_(engine), opts_(
     setupHandlers();
 }
 
+JsonGateway::~JsonGateway() {
+    stop();
+}
+
 bool JsonGateway::start(std::string* err) {
     bool ok = false;
     if (opts_.port == 0) {
@@ -35,11 +39,14 @@ bool JsonGateway::start(std::string* err) {
 }
 
 void JsonGateway::runAsync() {
-    std::thread([this] { srv_.listen_after_bind(); }).detach();
+    listenThread_ = std::thread([this] { srv_.listen_after_bind(); });
 }
 
 void JsonGateway::stop() {
     srv_.stop();
+    if (listenThread_.joinable()) {
+        listenThread_.join();
+    }
 }
 
 namespace {
